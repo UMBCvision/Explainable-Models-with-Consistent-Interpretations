@@ -4,6 +4,7 @@ r"""
 This module provides a number of benchmark datasets:
 
 * ImageNet ILSVCR 12 and other *image folders* datasets (:class:`ImageFolder`).
+# ImageNet Detection using bounding box annotations
 * PASCAL VOC (:class:`VOCDetection`).
 * MS COCO (:class:`CocoDetection`).
 
@@ -532,9 +533,7 @@ class ImageNetDetection(torchvision.datasets.VisionDataset):
 
         imagenet_root = self.root
         image_dir = os.path.join(imagenet_root, 'val')
-        annotation_dir = os.path.join(imagenet_root, 'annotation')
 
-        # pdb.set_trace()
         if not os.path.isdir(imagenet_root):
             raise RuntimeError('Dataset not found or corrupted.' +
                                ' You can use download=True to download it')
@@ -549,9 +548,6 @@ class ImageNetDetection(torchvision.datasets.VisionDataset):
         for im in self.images:
             self.annotations.append(im.replace('/val/', '/annotation/').replace('.JPEG', '.xml').replace('jpg', 'xml'))
         self.paths = paths
-        # with open(os.path.join(self.root, 'ILSVRC2012_validation_ground_truth.txt'), 'r') as label_file:
-        #     self.labels = label_file.readlines()
-        # self.labels = [int(line.strip('\n')) for line in self.labels]
 
     def __getitem__(self, index):
         """
@@ -574,15 +570,10 @@ class ImageNetDetection(torchvision.datasets.VisionDataset):
             target = int(label.split('.')[0]) - 1
         else:
             target = int(label)
-        # target = self.labels[index]
 
         if self.transform is not None:
             img = self.transform(img)
 
-        # if self.transforms is not None:
-        #     img, target = self.transforms(img, target)
-
-        # print(annotation)
         if self.paths:
             return img_path, img, annotation, target
         else:
