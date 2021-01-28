@@ -8,6 +8,7 @@ Pytorch 1.3 - Please install PyTorch (https://pytorch.org/get-started/locally/) 
 
 ## Training
 Following code can be used to train a ResNet 18 model on the ImageNet dataset
+
 CUDA_VISIBLE_DEVICES=0,1,2,3 python train_gcam_grid_consistency.py <path_to_imagenet_dataset> -a resnet18 -b 256 -j 16 --lambda 25 --save_dir <path_to_checkpoint_dir> 
 
 ## Evaluation
