@@ -7,9 +7,13 @@ Given the widespread deployment of black box deep neural networks in computer vi
 Pytorch 1.3 - Please install PyTorch (https://pytorch.org/get-started/locally/) and CUDA if you don't have it installed.
 
 ## Training
-Following code can be used to train a ResNet 18 model on the ImageNet dataset
-
+### ImageNet
+Following code can be used to train a ResNet 18 model on the ImageNet dataset <br/>
 CUDA_VISIBLE_DEVICES=0,1,2,3 python train_gcam_grid_consistency.py <path_to_imagenet_dataset> -a resnet18 -b 256 -j 16 --lambda 25 --save_dir <path_to_checkpoint_dir> 
+
+### MS-COCO
+Following code can be used to train a ResNet 18 model on the MS-COCO dataset <br/>
+CUDA_VISIBLE_DEVICES=0,1 python train_gcam_multiclass_grid_consistency.py <path_to_coco_dataset> -a resnet18 --num-gpus 2 --lr 0.01 -b 256 -j 16 --lambda 1 --resume <path_to_imagenet_pretrained_model_checkpoint> --save_dir <path_to_checkpoint_dir>
 
 ## Evaluation
 We use the evaluation code adapted from the [TorchRay](https://github.com/facebookresearch/TorchRay) framework. For the SPG metric introduced in our paper, we use a stochastic version of the pointing game metric to sample 100 points from the 2D map of the normalized Grad-CAM interpretation heatmap and evaluate using the bounding box annotation for ImageNet validation set.
@@ -29,13 +33,13 @@ For the ImageNet dataset, this evaluation requires the following structure for I
 
 Evaluation metrics for Interpretation Consistency:
 <ol>
-<li>Pointing Game:
+<li>Pointing Game: <br/>
 CUDA_VISIBLE_DEVICES=0 python evaluate_imagenet_gradcam_pointinggame.py <path_to_imagenet_validation_root> -j 0 -b 1 --resume <path_to_model_checkpoint> --input_resize 448
 </li> 
-<li>Stochastic Pointing Game:
+<li>Stochastic Pointing Game: <br/>
 CUDA_VISIBLE_DEVICES=0 python evaluate_imagenet_gradcam_stochastic_pointinggame.py <path_to_imagenet_validation_root> -j 0 -b 1 --resume <path_to_model_checkpoint> --input_resize 448
 </li> 
-<li>Content Heatmap:
+<li>Content Heatmap: <br/>
 CUDA_VISIBLE_DEVICES=0 python evaluate_imagenet_gradcam_energy_inside_bbox.py <path_to_imagenet_validation_root> -j 0 -b 1 --resume <path_to_model_checkpoint> --input_resize 448
 </li> 
 </ol>
