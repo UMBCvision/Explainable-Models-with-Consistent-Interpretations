@@ -199,7 +199,7 @@ class ResNet(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def _forward(self, images, composite_images=None, targets=None, gt_quadrants=None,
+    def _forward(self, images, composite_images=None, targets=None, gcam_gt_targets=None, gt_quadrants=None,
                  xe_criterion=None, l1_criterion=None, eval=False, return_feats=False):
         """
         This function serves as the wrapper which computes both losses and returns the loss values
@@ -208,11 +208,12 @@ class ResNet(nn.Module):
         :param images:
         :param composite_images:
         :param targets:
+        :param gcam_gt_targets:
         :param gt_quadrants:
         :param xe_criterion:
         :param l1_criterion:
         :param eval: If True, call forward_eval for original resnet forward function
-        :param return_feats: return forward vanilla while also returning layer4 feats
+        :param return_feats: return original resnet forward outputs while also returning layer4 feats
         :return:
         """
 
@@ -226,6 +227,7 @@ class ResNet(nn.Module):
         gt_quadrants = gt_quadrants[sorted_indices]
         images = images[sorted_indices]
         targets = targets[sorted_indices]
+        gcam_gt_targets = gcam_gt_targets[sorted_indices]
         composite_images = composite_images[sorted_indices]
 
         # Obtain the feats and output for positive category images
@@ -255,10 +257,10 @@ class ResNet(nn.Module):
         composite_images_outputs = self.fc(y)
 
         # Standard cross-entropy loss
-        xe_loss = xe_criterion(images_outputs, targets)
+        xe_loss = xe_criterion(images_outputs, targets.float())
 
         # compute gcam for images
-        orig_gradcam_mask = utils.compute_gradcam(images_outputs, images_feats, targets)
+        orig_gradcam_mask = utils.compute_gradcam(images_outputs, images_feats, gcam_gt_targets)
         feats_spatial_size = images_feats.shape[-1]
 
         gt_quadrants_np = gt_quadrants.cpu().numpy()
@@ -271,7 +273,7 @@ class ResNet(nn.Module):
                 quad_index_start_dict[quad_index] = quad_position[0]
         quad_index_start_dict['end'] = images.shape[0]   # append the batch size as the last index
 
-        # create GT mask for the composite gradcam
+        # create the GT mask for the gradcam
         gradcam_gt_mask = torch.zeros((images.shape[0], 2*feats_spatial_size, 2*feats_spatial_size)).cuda()
 
         # we will be indexing into quad_index_start_dict to obtain quadrant start indices
@@ -286,8 +288,8 @@ class ResNet(nn.Module):
                 k * feats_spatial_size:(k + 1) * feats_spatial_size] = \
                     orig_gradcam_mask[quad_index_start_dict[index]:quad_index_start_dict[next_index], :, :]
 
-        # compute gcam for composite_images
-        composite_gradcam_mask = utils.compute_gradcam(composite_images_outputs, composite_images_feats, targets)
+        # compute gcam for composite_images for the given GT target category
+        composite_gradcam_mask = utils.compute_gradcam(composite_images_outputs, composite_images_feats, gcam_gt_targets)
 
         # L1 loss between the desired heatmap and the GT heatmap for the composite image
         gcam_loss = l1_criterion(composite_gradcam_mask, gradcam_gt_mask)
