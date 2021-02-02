@@ -4,10 +4,8 @@ Official PyTorch implementation for the AAAI 2021 paper ['Explainable Models wit
 Given the widespread deployment of black box deep neural networks in computer vision applications, the interpretability aspect of these black box systems has recently gained traction. Various methods have been proposed to explain the results of such deep neural networks. However, some recent works have shown that such explanation methods are biased and do not produce consistent interpretations. Hence, rather than introducing a novel explanation method, we learn models that are encouraged to be interpretable given an explanation method. We use Grad-CAM as the explanation algorithm and encourage the network to learn consistent interpretations along with maximizing the log-likelihood of the correct class. We show that our method outperforms the baseline on the pointing game evaluation on ImageNet and MS-COCO datasets respectively. We also introduce new evaluation metrics that penalize the saliency map if it lies outside the ground truth bounding box or segmentation mask, and show that our method outperforms the baseline on these metrics as well. Moreover, our model trained with interpretation consistency generalizes to other explanation algorithms on all the evaluation metrics.
 
 ## Pre-requisites
-<ul>
-   <li>Pytorch 1.3 - Please install [PyTorch](https://pytorch.org/get-started/locally/) and CUDA if you don't have it installed. </li>
-   <li>[pycocotools](https://pypi.org/project/pycocotools/)</li>
-</ul>
+- Pytorch 1.3 - Please install [PyTorch](https://pytorch.org/get-started/locally/) and CUDA if you don't have it installed. 
+- [pycocotools](https://pypi.org/project/pycocotools/)
 
 ## Training
 ### ImageNet
@@ -47,7 +45,14 @@ CUDA_VISIBLE_DEVICES=0 python evaluate_imagenet_gradcam_energy_inside_bbox.py <p
 </li> 
 </ol>
 
+## Model checkpoints
+### Imagenet
+- Baseline: [ResNet18](https://drive.google.com/file/d/1jBPTU75iar5dSoqB3jlNMcAnOSY3H17n/view?usp=sharing)
+- Ours: [ResNet18](https://drive.google.com/file/d/1W52-sYbyPi-VFLRNlIWAwx4MExWiqMS_/view?usp=sharing)
 
+### MS-COCO
+- Baseline: [ResNet18](https://drive.google.com/file/d/1N4Fj-cnNBC-SuFfAp7gOwaflhFXVxKnv/view?usp=sharing)
+- Ours: [ResNet18](https://drive.google.com/file/d/1lywamp5cLkZs1CCU5vTi7Rpd3vfd4shM/view?usp=sharing)
 
 ## Acknowledgement
 We would like to thank Ashley Rothballer and Dennis Fong for helpful disucssions regarding this work.
