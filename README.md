@@ -57,3 +57,6 @@ CUDA_VISIBLE_DEVICES=0 python evaluate_imagenet_gradcam_energy_inside_bbox.py <p
 ## Acknowledgement
 We would like to thank Ashley Rothballer and Dennis Fong for helpful disucssions regarding this work.
 This material is based upon work partially supported by the United States Air Force under Contract No. FA8750-19-C-0098, funding from NSF grant number 1845216, SAP SE, and Northrop Grumman. Any opinions, findings, and conclusions or recommendations expressed in this material are those of the authors and do not necessarily reflect the views of the United States Air Force, DARPA, or other funding agencies.
+
+## License
+This project is licensed under the MIT license.
