@@ -6,8 +6,6 @@
 
 import argparse
 import time
-import numpy as np
-import pdb
 import torch
 import torch.nn as nn
 import torch.nn.parallel
@@ -21,12 +19,11 @@ import torchvision.datasets as datasets
 import os
 from PIL import Image
 from utils import save_checkpoint, AverageMeter
-from logger import Logger
 import coco_dataset_gcam
-import resnet_multigpu_multiclass as models
+import resnet_multigpu_multiclass as resnet
 
 
-model_names = ['resnet18', 'resnet50', 'resnext50', 'resnext101']
+model_names = ['resnet18', 'resnet50']
 
 
 class VanillaCocoDetection(datasets.coco.CocoDetection):
@@ -99,22 +96,18 @@ parser.add_argument('--dist-backend', default='gloo', type=str,
                     help='distributed backend')
 parser.add_argument('--lambda', default=1, type=float,
                     metavar='LAM', help='lambda hyperparameter for GCAM loss', dest='lambda_val')
+parser.add_argument('--maxpool', dest='maxpool', action='store_true',
+                    help='use maxpool version of ResNet architecture')
 parser.add_argument('--save_dir', default='checkpoint', type=str, metavar='SV_PATH',
                     help='path to save checkpoints (default: none)')
-parser.add_argument('--log_dir', default='logs', type=str, metavar='LG_PATH',
-                    help='path to write logs (default: logs)')
 
 
 def main():
     global args
     args = parser.parse_args()
     os.makedirs(args.save_dir, exist_ok=True)
-    os.makedirs(args.log_dir, exist_ok=True)
 
     print('config: wd', args.weight_decay, 'lr', args.lr, 'batch_size', args.batch_size, 'num_gpus', args.num_gpus)
-    logger = Logger(log_dir=args.log_dir)
-    args_dict = vars(args)
-    logger.add_hyperparams(args_dict)
 
     args.distributed = args.world_size > 1
 
@@ -124,12 +117,20 @@ def main():
 
     # create model for COCO (80 classes)
     print("=> creating model '{}'".format(args.arch))
-    model = models.__dict__[args.arch](num_classes=80)
+    if args.maxpool:
+        model = resnet.__dict__[args.arch](num_classes=80, maxpool=True)
+    else:
+        model = resnet.__dict__[args.arch](num_classes=80)
 
     model = torch.nn.DataParallel(model).cuda()
 
     bce_criterion = nn.BCEWithLogitsLoss().cuda()
     l1_criterion = nn.L1Loss().cuda()
+
+    params = list()
+    for n, p in model.named_parameters():
+        if '.ups.' not in n:
+            params.append(p)
     optimizer = torch.optim.SGD([{'params': iter(params), 'lr': args.lr},
                                  ], lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 
@@ -320,7 +321,6 @@ def validate_multi(val_loader, model, bce_criterion):
     for i, (images, targets) in enumerate(val_loader):
         images = images.cuda(non_blocking=True)
         targets = targets.cuda(non_blocking=True)
-        # original_target = target
 
         # compute output
         with torch.no_grad():

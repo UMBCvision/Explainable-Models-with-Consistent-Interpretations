@@ -125,7 +125,7 @@ class ResNet(nn.Module):
 
     def __init__(self, block, layers, num_classes=1000, zero_init_residual=False,
                  groups=1, width_per_group=64, replace_stride_with_dilation=None,
-                 norm_layer=None):
+                 norm_layer=None, maxpool=False):
         super(ResNet, self).__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
@@ -154,7 +154,12 @@ class ResNet(nn.Module):
                                        dilate=replace_stride_with_dilation[1])
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2,
                                        dilate=replace_stride_with_dilation[2])
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        # If maxpool flag is set, we replace the last global average pooling layer with global max pooling
+        if maxpool:
+            self.last_pooling_operation = nn.AdaptiveMaxPool2d((1, 1))
+        else:
+            self.last_pooling_operation = nn.AdaptiveAvgPool2d((1, 1))
+
         self.fc = nn.Linear(512 * block.expansion, num_classes)
         self.upsample = nn.Upsample((7, 7), mode='bilinear')
 
@@ -239,7 +244,7 @@ class ResNet(nn.Module):
         x = self.layer2(x)
         x = self.layer3(x)
         images_feats = self.layer4(x)
-        x = self.avgpool(images_feats)
+        x = self.last_pooling_operation(images_feats)
         x = torch.flatten(x, 1)
         images_outputs = self.fc(x)
 
@@ -252,7 +257,7 @@ class ResNet(nn.Module):
         y = self.layer2(y)
         y = self.layer3(y)
         composite_images_feats = self.layer4(y)
-        y = self.avgpool(composite_images_feats)
+        y = self.last_pooling_operation(composite_images_feats)
         y = torch.flatten(y, 1)
         composite_images_outputs = self.fc(y)
 
@@ -307,7 +312,7 @@ class ResNet(nn.Module):
         x = self.layer3(x)
         x = self.layer4(x)
 
-        x = self.avgpool(x)
+        x = self.last_pooling_operation(x)
         x = torch.flatten(x, 1)
         x = self.fc(x)
 
@@ -324,7 +329,7 @@ class ResNet(nn.Module):
         x = self.layer3(x)
         feats = self.layer4(x)
 
-        x = self.avgpool(feats)
+        x = self.last_pooling_operation(feats)
         x = torch.flatten(x, 1)
         x = self.fc(x)
 

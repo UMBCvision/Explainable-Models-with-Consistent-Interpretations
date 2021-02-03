@@ -4,7 +4,6 @@ import random
 import shutil
 import time
 import warnings
-import pdb
 import torch
 import torch.nn as nn
 import torch.nn.parallel
@@ -14,18 +13,13 @@ import torch.optim
 import torch.multiprocessing as mp
 import torch.utils.data
 import torch.utils.data.distributed
-import torchvision
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 from folder_composite import ImageFolder
-import torchvision.models as models
 import resnet_multigpu as resnet
-import numpy as np
 
 
-model_names = sorted(name for name in models.__dict__
-    if name.islower() and not name.startswith("__")
-    and callable(models.__dict__[name]))
+model_names = ['resnet18', 'resnet50']
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training with Grad-CAM consistency')
 parser.add_argument('data', metavar='DIR',
@@ -80,6 +74,8 @@ parser.add_argument('--multiprocessing-distributed', action='store_true',
                          'multi node data parallel training')
 parser.add_argument('--lambda', default=1, type=float,
                     metavar='LAM', help='lambda hyperparameter for GCAM loss', dest='lambda_val')
+parser.add_argument('--maxpool', dest='maxpool', action='store_true',
+                    help='use maxpool version of ResNet architecture')
 parser.add_argument('--save_dir', default='checkpoint', type=str, metavar='SV_PATH',
                     help='path to save checkpoints (default: none)')
 best_acc1 = 0
@@ -139,15 +135,17 @@ def main_worker(gpu, ngpus_per_node, args):
                                 world_size=args.world_size, rank=args.rank)
     # create model
     if args.pretrained:
-        # print("=> using pre-trained model '{}'".format(args.arch))
-        # model = models.__dict__[args.arch](pretrained=True)
-        print("=> using pre-trained model 'resnet18'")
-        model = resnet.resnet18(pretrained=True)
+        print("=> using pre-trained model '{}'".format(args.arch))
+        if args.maxpool:
+            model = resnet.__dict__[args.arch](pretrained=True, maxpool=True)
+        else:
+            model = resnet.__dict__[args.arch](pretrained=True)
     else:
-        # print("=> creating model '{}'".format(args.arch))
-        # model = models.__dict__[args.arch]()
-        print("=> creating model 'resnet18'")
-        model = resnet.resnet18()
+        print("=> creating model '{}'".format(args.arch))
+        if args.maxpool:
+            model = resnet.__dict__[args.arch](maxpool=True)
+        else:
+            model = resnet.__dict__[args.arch]()
 
     if args.distributed:
         # For multiprocessing distributed, DistributedDataParallel constructor
