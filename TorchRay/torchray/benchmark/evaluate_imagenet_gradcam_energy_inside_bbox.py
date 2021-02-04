@@ -5,20 +5,14 @@ import torch
 import torch.nn as nn
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
-import torch.distributed as dist
 import torch.optim
 import torch.utils.data as data
 import torch.utils.data.distributed
-import torchvision
 import torchvision.transforms as transforms
-import torchvision.datasets as datasets
 import resnet_multigpu as resnet
 import resnet_multigpu_maxpool as resnet_max
 import alexnet_multigpu as alexnet
-import os
 import cv2
-from PIL import Image
-import pdb
 import datasets as pointing_datasets
 
 """ 
@@ -166,13 +160,13 @@ def compute_gradcam(output, feats, target):
     Compute the gradcam for the top predicted category
     :param output:
     :param feats:
+    :param target:
     :return:
     """
     eps = 1e-8
     relu = nn.ReLU(inplace=True)
 
     target = target.cpu().numpy()
-    # target = np.argmax(output.cpu().data.numpy(), axis=-1)
     one_hot = np.zeros((output.shape[0], output.shape[-1]), dtype=np.float32)
     indices_range = np.arange(output.shape[0])
     one_hot[indices_range, target[indices_range]] = 1
@@ -183,10 +177,8 @@ def compute_gradcam(output, feats, target):
     one_hot_cuda = torch.sum(one_hot.cuda() * output)
     dy_dz1, = torch.autograd.grad(one_hot_cuda, feats, grad_outputs=torch.ones(one_hot_cuda.size()).cuda(),
                                   retain_graph=True, create_graph=True)
-    dy_dz_sum1 = dy_dz1.sum(dim=2).sum(dim=2)
-    gcam512_1 = dy_dz_sum1.unsqueeze(-1).unsqueeze(-1) * feats
-    # Comment the above 2 lines and uncomment the below one to change to dot product of grad and features to preserve grad spatial locations
-    # gcam512_1 = dy_dz1 * feats
+    # Changing to dot product of grad and features to preserve grad spatial locations
+    gcam512_1 = dy_dz1 * feats
     gradcam = gcam512_1.sum(dim=1)
     gradcam = relu(gradcam)
     spatial_sum1 = gradcam.sum(dim=[1, 2]).unsqueeze(-1).unsqueeze(-1)
@@ -208,8 +200,6 @@ def unwrap_dict(dict_object):
             new_v = unwrap_dict(v)
         elif isinstance(v, list) and len(v) == 1:
             new_v = v[0]
-            # if isinstance(new_v, dict):
-            #     new_v = unwrap_dict(new_v)
         else:
             new_v = v
         new_dict[k] = new_v

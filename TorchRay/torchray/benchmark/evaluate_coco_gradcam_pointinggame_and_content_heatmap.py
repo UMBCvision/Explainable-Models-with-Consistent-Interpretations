@@ -14,18 +14,15 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import resnet_multigpu as resnet
 import resnet_multigpu_maxpool as resnet_max
-import alexnet_multigpu as alexnet
-import vgg_multigpu as vgg
 import os
 import cv2
 from PIL import Image
-import pdb
 import datasets as pointing_datasets
 from pointing_game import PointingGameBenchmark
 
-
 """ 
-    Here, we evaluate the pointing game on imagenet dataset by using the bbox annotations on the val dataset.
+    Here, we evaluate the Pointing Game (PG) and Content Heatmap (CH) on MS-COCO dataset 
+    by using the segmentation mask annotations on the val dataset.
 """
 
 model_names = ['resnet18', 'resnet50', 'alexnet']
@@ -57,27 +54,13 @@ def main():
     global args
     args = parser.parse_args()
 
-    if args.pretrained:
-        if args.maxpool:
-            print("=> using maxpool version of pre-trained model '{}'".format(args.arch))
-            model = resnet_max.__dict__[args.arch](pretrained=True)
-        else:
-            print("=> using pre-trained model '{}'".format(args.arch))
-            if args.arch.startswith('resnet'):
-                model = resnet.__dict__[args.arch](pretrained=True)
-            elif args.arch.startswith('alexnet'):
-                model = alexnet.__dict__[args.arch](pretrained=True)
-            elif args.arch.startswith('vgg'):
-                model = vgg.__dict__[args.arch](pretrained=True)
-            else:
-                assert False, 'Unsupported architecture: {}'.format(args.arch)
+    if args.maxpool:
+        print("=> creating maxpool version of model '{}'".format(args.arch))
+        model = resnet_max.__dict__[args.arch](num_classes=80)
     else:
-        if args.maxpool:
-            print("=> creating maxpool version of model '{}'".format(args.arch))
-            model = resnet_max.__dict__[args.arch]()
-        else:
-            print("=> creating model '{}'".format(args.arch))
-            model = resnet.__dict__[args.arch]()
+        print("=> creating model '{}'".format(args.arch))
+        model = resnet.__dict__[args.arch](num_classes=80)
+
     model = torch.nn.DataParallel(model).cuda()
 
     if args.resume:
@@ -91,78 +74,93 @@ def main():
     cudnn.benchmark = True
 
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                         std=[0.229, 0.224, 0.225])
+                                     std=[0.229, 0.224, 0.225])
 
     # Here, we don't resize the images. Instead, we feed the full image and use AdaptivePooling before FC.
-    # We will resize Gradcam heatmap to image size and compare the actual bbox co-ordinates
-    val_dataset = pointing_datasets.ImageNetDetection(args.data,
-                                                      transform=transforms.Compose([
-                                           transforms.Resize(args.input_resize),
-                                           transforms.ToTensor(),
-                                           normalize,
-                                       ]))
+    # We will resize Gradcam heatmap to image size and compare the actual mask
+    val_dataset = pointing_datasets.CocoDetection(os.path.join(args.data, 'val2014'),
+                                                  os.path.join(args.data, 'annotations/instances_val2014.json'),
+                                                  transform=transforms.Compose([
+                                                      transforms.Resize(args.input_resize),
+                                                      transforms.ToTensor(),
+                                                      normalize,
+                                                  ]))
 
     # we set batch size=1 since we are loading full resolution images.
     val_loader = torch.utils.data.DataLoader(
         val_dataset, batch_size=1, shuffle=False,
-        num_workers=args.workers, pin_memory=True)
+        num_workers=0, pin_memory=True, collate_fn=val_dataset.collate)
 
     validate_multi(val_loader, val_dataset, model)
 
 
 def validate_multi(val_loader, val_dataset, model):
     batch_time = AverageMeter()
+    heatmap_inside_segmask = AverageMeter()
 
     # switch to evaluate mode
     model.eval()
 
     pointinggame = PointingGameBenchmark(val_dataset)
     end = time.time()
-    for i, (images, annotation, targets) in enumerate(val_loader):
+    for i, (images, annotation) in enumerate(val_loader):
         images = images.cuda(non_blocking=True)
-        targets = targets.cuda(non_blocking=True)
 
-        # we assume batch size == 1 and unwrap the first elem of every list in annotation object
-        annotation = unwrap_dict(annotation)
-        image_size = val_dataset.as_image_size(annotation)
-
+        # compute output
+        # we have added return_feats=True to get the output as well as layer4 conv feats
         output, feats = model(images, return_feats=True)
-        output_gradcam = compute_gradcam(output, feats, targets)
-        output_gradcam_np = output_gradcam.data.cpu().numpy()[0]    # since we have batch size==1
-        resized_output_gradcam = cv2.resize(output_gradcam_np, image_size)
-        spatial_sum = resized_output_gradcam.sum()
-        if spatial_sum <= 0:
-            # We ignore images with zero Grad-CAM
+        class_ids = val_dataset.as_class_ids(annotation[0])
+        if len(class_ids) == 0:
             continue
-        resized_output_gradcam = resized_output_gradcam / spatial_sum
+        image_size = val_dataset.as_image_size(annotation[0])
 
-        # we select the max point on the output gradcam for the Pointing Game metric
-        sample_index = resized_output_gradcam.argmax()
-        sample_x, sample_y = np.unravel_index(sample_index, (image_size[1], image_size[0]))
+        # Now, we iterate over every GT category
+        for class_id in class_ids:
+            output_gradcam = compute_gradcam(output, feats, class_id)
+            output_gradcam_np = output_gradcam.data.cpu().numpy()[0]    # since we have batch size==1
+            resized_output_gradcam = cv2.resize(output_gradcam_np, image_size)
+            spatial_sum = resized_output_gradcam.sum()
+            if spatial_sum <= 0:
+                # We ignore images with zero Grad-CAM
+                continue
+            resized_output_gradcam = resized_output_gradcam / spatial_sum
 
-        hit = pointinggame.evaluate(annotation, targets[0].item(), (sample_x, sample_y))
-        pointinggame.aggregate(hit, targets[0].item())
+            gt_mask = val_dataset.as_mask(annotation[0], class_id)
+            gt_mask = gt_mask.type(torch.ByteTensor)
+            gt_mask = gt_mask.cpu().data.numpy()
+            gcam_inside_gt_mask = gt_mask * resized_output_gradcam
+            total_gcam_inside_gt_mask = gcam_inside_gt_mask.sum()
+            heatmap_inside_segmask.update(total_gcam_inside_gt_mask)
+
+            # We select the max point on the GCAM mask
+            sample_index = resized_output_gradcam.argmax()
+            sample_x, sample_y = np.unravel_index(sample_index, (image_size[1], image_size[0]))
+            hit = pointinggame.evaluate(annotation[0], class_id, (sample_x, sample_y))
+            pointinggame.aggregate(hit, class_id)
 
         if i % 1000 == 0:
-            print('\nImagenet pointing game results after {} examples: '.format(i+1))
+            print('\nCOCO pointing game results after {} examples: '.format(i+1))
             print(pointinggame)
+            print('\nCurr % of heatmap inside seg mask (Content Heatmap): {:.4f} ({:.4f})'.format(heatmap_inside_segmask.val * 100,
+                                                                                 heatmap_inside_segmask.avg * 100))
 
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
 
-    print('\nFinal Results - Imagenet pointing game')
+    print('\n')
     print(pointinggame)
+    print('\n\n% of heatmap inside seg mask (Content Heatmap): {:.4f}'.format(heatmap_inside_segmask.avg * 100))
 
     return
 
 
 def compute_gradcam(output, feats, target):
     """
-    Compute the gradcam for the given target
+    Compute the gradcam for the top predicted category
     :param output:
     :param feats:
-    :param: target:
+    :param target:
     :return:
     """
     eps = 1e-8
@@ -179,8 +177,10 @@ def compute_gradcam(output, feats, target):
     one_hot_cuda = torch.sum(one_hot.cuda() * output)
     dy_dz1, = torch.autograd.grad(one_hot_cuda, feats, grad_outputs=torch.ones(one_hot_cuda.size()).cuda(),
                                   retain_graph=True, create_graph=True)
-    # Changing to dot product of grad and features to preserve grad spatial locations
-    gcam512_1 = dy_dz1 * feats
+    dy_dz_sum1 = dy_dz1.sum(dim=2).sum(dim=2)
+    gcam512_1 = dy_dz_sum1.unsqueeze(-1).unsqueeze(-1) * feats
+    # Comment the above 2 lines and uncomment the below one to change to dot product of grad and features to preserve grad spatial locations
+    # gcam512_1 = dy_dz1 * feats
     gradcam = gcam512_1.sum(dim=1)
     gradcam = relu(gradcam)
     spatial_sum1 = gradcam.sum(dim=[1, 2]).unsqueeze(-1).unsqueeze(-1)
@@ -202,6 +202,8 @@ def unwrap_dict(dict_object):
             new_v = unwrap_dict(v)
         elif isinstance(v, list) and len(v) == 1:
             new_v = v[0]
+            # if isinstance(new_v, dict):
+            #     new_v = unwrap_dict(new_v)
         else:
             new_v = v
         new_dict[k] = new_v

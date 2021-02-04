@@ -177,11 +177,8 @@ def validate_multi(val_loader, val_dataset, model):
             print('\n{} val images:'.format(i+1))
             expected_value_arr = np.array(expected_value_list)
             mean_expectation = expected_value_arr.mean()
-            stddev_expectation = expected_value_arr.std()
             print('Mean - Expected value for 100 stochastic samples/image for hits(1) and misses(0): {}'.format(
                 mean_expectation))
-            print('Std dev - Expected value for 100 stochastic samples/image for hits(1) and misses(0): {}'.format(
-                stddev_expectation))
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -189,11 +186,8 @@ def validate_multi(val_loader, val_dataset, model):
 
     expected_value_arr = np.array(expected_value_list)
     mean_expectation = expected_value_arr.mean()
-    stddev_expectation = expected_value_arr.std()
     print('Mean - Expected value for 100 stochastic samples/image for hits(1) and misses(0): {}'.format(
         mean_expectation))
-    print('Std dev - Expected value for 100 stochastic samples/image for hits(1) and misses(0): {}'.format(
-        stddev_expectation))
 
     return
 

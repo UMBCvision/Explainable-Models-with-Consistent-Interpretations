@@ -5,27 +5,20 @@ import torch
 import torch.nn as nn
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
-import torch.distributed as dist
 import torch.optim
 import torch.utils.data as data
 import torch.utils.data.distributed
-import torchvision
 import torchvision.transforms as transforms
-import torchvision.datasets as datasets
 import resnet_multigpu as resnet
 import resnet_multigpu_maxpool as resnet_max
-import alexnet_multigpu as alexnet
-import vgg_multigpu as vgg
 import os
 import cv2
-from PIL import Image
-import pdb
 import datasets as pointing_datasets
 from pointing_game import PointingGameBenchmark
 
-
 """ 
-    Here, we evaluate the pointing game on imagenet dataset by using the bbox annotations on the val dataset.
+    Here, we evaluate Stochastic Pointing Game (SPG) on MS-COCO dataset 
+    by using the segmentation mask annotations on the val dataset.
 """
 
 model_names = ['resnet18', 'resnet50', 'alexnet']
@@ -52,32 +45,16 @@ parser.add_argument('--input_resize', default=224, type=int,
 parser.add_argument('--maxpool', dest='maxpool', action='store_true',
                     help='use maxpool version of the model')
 
-
 def main():
     global args
     args = parser.parse_args()
 
-    if args.pretrained:
-        if args.maxpool:
-            print("=> using maxpool version of pre-trained model '{}'".format(args.arch))
-            model = resnet_max.__dict__[args.arch](pretrained=True)
-        else:
-            print("=> using pre-trained model '{}'".format(args.arch))
-            if args.arch.startswith('resnet'):
-                model = resnet.__dict__[args.arch](pretrained=True)
-            elif args.arch.startswith('alexnet'):
-                model = alexnet.__dict__[args.arch](pretrained=True)
-            elif args.arch.startswith('vgg'):
-                model = vgg.__dict__[args.arch](pretrained=True)
-            else:
-                assert False, 'Unsupported architecture: {}'.format(args.arch)
+    if args.maxpool:
+        print("=> creating maxpool version of model '{}'".format(args.arch))
+        model = resnet_max.__dict__[args.arch](num_classes=80)
     else:
-        if args.maxpool:
-            print("=> creating maxpool version of model '{}'".format(args.arch))
-            model = resnet_max.__dict__[args.arch]()
-        else:
-            print("=> creating model '{}'".format(args.arch))
-            model = resnet.__dict__[args.arch]()
+        print("=> creating model '{}'".format(args.arch))
+        model = resnet.__dict__[args.arch](num_classes=80)
     model = torch.nn.DataParallel(model).cuda()
 
     if args.resume:
@@ -94,18 +71,19 @@ def main():
                                          std=[0.229, 0.224, 0.225])
 
     # Here, we don't resize the images. Instead, we feed the full image and use AdaptivePooling before FC.
-    # We will resize Gradcam heatmap to image size and compare the actual bbox co-ordinates
-    val_dataset = pointing_datasets.ImageNetDetection(args.data,
-                                                      transform=transforms.Compose([
-                                           transforms.Resize(args.input_resize),
-                                           transforms.ToTensor(),
-                                           normalize,
-                                       ]))
+    # We will resize Gradcam heatmap to image size and compare the actual mask
+    val_dataset = pointing_datasets.CocoDetection(os.path.join(args.data, 'val2014'),
+                                                  os.path.join(args.data, 'annotations/instances_val2014.json'),
+                                                  transform=transforms.Compose([
+                                                      transforms.Resize(args.input_resize),
+                                                      transforms.ToTensor(),
+                                                      normalize,
+                                                  ]))
 
     # we set batch size=1 since we are loading full resolution images.
     val_loader = torch.utils.data.DataLoader(
         val_dataset, batch_size=1, shuffle=False,
-        num_workers=args.workers, pin_memory=True)
+        num_workers=0, pin_memory=True, collate_fn=val_dataset.collate)
 
     validate_multi(val_loader, val_dataset, model)
 
@@ -116,43 +94,80 @@ def validate_multi(val_loader, val_dataset, model):
     # switch to evaluate mode
     model.eval()
 
+    expected_value_list = []
+    NUM_SAMPLES = 100
+    TOLERANCE = 15
     pointinggame = PointingGameBenchmark(val_dataset)
     end = time.time()
-    for i, (images, annotation, targets) in enumerate(val_loader):
+    for i, (images, annotation) in enumerate(val_loader):
         images = images.cuda(non_blocking=True)
-        targets = targets.cuda(non_blocking=True)
 
-        # we assume batch size == 1 and unwrap the first elem of every list in annotation object
-        annotation = unwrap_dict(annotation)
-        image_size = val_dataset.as_image_size(annotation)
-
+        # compute output
+        # we have added return_feats=True to get the output as well as layer4 conv feats
         output, feats = model(images, return_feats=True)
-        output_gradcam = compute_gradcam(output, feats, targets)
-        output_gradcam_np = output_gradcam.data.cpu().numpy()[0]    # since we have batch size==1
-        resized_output_gradcam = cv2.resize(output_gradcam_np, image_size)
-        spatial_sum = resized_output_gradcam.sum()
-        if spatial_sum <= 0:
-            # We ignore images with zero Grad-CAM
+        class_ids = val_dataset.as_class_ids(annotation[0])
+        if (len(annotation[0]) == 0) or annotation[0] is None:
+            # this image lacks annotation and hence we skip this
             continue
-        resized_output_gradcam = resized_output_gradcam / spatial_sum
+        else:
+            w, h = val_dataset.as_image_size(annotation[0])
 
-        # we select the max point on the output gradcam for the Pointing Game metric
-        sample_index = resized_output_gradcam.argmax()
-        sample_x, sample_y = np.unravel_index(sample_index, (image_size[1], image_size[0]))
+        # Now, we iterate over every GT category
+        for class_id in class_ids:
+            output_gradcam = compute_gradcam(output, feats, class_id)
+            output_gradcam_np = output_gradcam.data.cpu().numpy()[0]    # since we have batch size==1
+            resized_output_gradcam = cv2.resize(output_gradcam_np, (w, h))
+            spatial_sum = resized_output_gradcam.sum()
+            if spatial_sum <= 0:
+                # We ignore images with zero Grad-CAM
+                continue
+            resized_output_gradcam = resized_output_gradcam / spatial_sum
 
-        hit = pointinggame.evaluate(annotation, targets[0].item(), (sample_x, sample_y))
-        pointinggame.aggregate(hit, targets[0].item())
+            gt_mask = pointing_datasets.coco_as_mask(val_dataset, annotation[0], class_id)
+
+            # output_gradcam is now normalized and can be considered as probabilities
+            # We sample a point on the GCAM mask using the normalized GCAM as probabilities
+            # sample_index = np.random.choice(np.arange(h*w), p=resized_output_gradcam.ravel())
+            sample_indices = np.random.choice(np.arange(h * w), NUM_SAMPLES, p=resized_output_gradcam.ravel())
+            curr_image_hits = []
+            for sample_index in sample_indices:
+                sample_x, sample_y = np.unravel_index(sample_index, (h, w))
+                v, u = torch.meshgrid((
+                    (torch.arange(gt_mask.shape[0],
+                                  dtype=torch.float32) - sample_x) ** 2,
+                    (torch.arange(gt_mask.shape[1],
+                                  dtype=torch.float32) - sample_y) ** 2,
+                ))
+                accept = (v + u) < TOLERANCE ** 2
+                hit = (gt_mask & accept).view(-1).any()
+                if hit:
+                    hit = +1
+                else:
+                    hit = -1
+                # hit = pointinggame.evaluate(annotation[0], class_id, (sample_x, sample_y))
+                curr_image_hits.append((hit + 1) / 2)
+            curr_image_hits_arr = np.array(curr_image_hits)
+            # we have a bernoulli distribution for the hits, so we compute mean and variance
+            pos_prob = float(curr_image_hits_arr.sum()) / float(NUM_SAMPLES)
+            # expected_value_list.append(pos_prob)
+            expected_value_list.append(pos_prob*100)    # We need % for mean
 
         if i % 1000 == 0:
-            print('\nImagenet pointing game results after {} examples: '.format(i+1))
-            print(pointinggame)
+            print('\nCOCO stochastic pointing game results after {} examples: '.format(i+1))
+            expected_value_arr = np.array(expected_value_list)
+            mean_expectation = expected_value_arr.mean()
+            print('Mean - Expected value for 100 stochastic samples/image for hits(1) and misses(0): {}'.format(
+                mean_expectation))
 
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
 
-    print('\nFinal Results - Imagenet pointing game')
-    print(pointinggame)
+    print('\n\n')
+    expected_value_arr = np.array(expected_value_list)
+    mean_expectation = expected_value_arr.mean()
+    print('Mean - Expected value for 100 stochastic samples/image for hits(1) and misses(0): {}'.format(
+        mean_expectation))
 
     return
 
