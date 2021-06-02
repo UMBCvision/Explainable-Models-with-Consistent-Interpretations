@@ -1,5 +1,5 @@
 # Explainable Models with Consistent Interpretations
-Official PyTorch implementation for the AAAI 2021 paper ['Explainable Models with Consistent Interpretations'](https://www.csee.umbc.edu/~hpirsiav/papers/gc_aaai21.pdf)
+Official PyTorch implementation for the AAAI 2021 paper ['Explainable Models with Consistent Interpretations'](https://ojs.aaai.org/index.php/AAAI/article/view/16344/16151)
 
 Given the widespread deployment of black box deep neural networks in computer vision applications, the interpretability aspect of these black box systems has recently gained traction. Various methods have been proposed to explain the results of such deep neural networks. However, some recent works have shown that such explanation methods are biased and do not produce consistent interpretations. Hence, rather than introducing a novel explanation method, we learn models that are encouraged to be interpretable given an explanation method. We use Grad-CAM as the explanation algorithm and encourage the network to learn consistent interpretations along with maximizing the log-likelihood of the correct class. We show that our method outperforms the baseline on the pointing game evaluation on ImageNet and MS-COCO datasets respectively. We also introduce new evaluation metrics that penalize the saliency map if it lies outside the ground truth bounding box or segmentation mask, and show that our method outperforms the baseline on these metrics as well. Moreover, our model trained with interpretation consistency generalizes to other explanation algorithms on all the evaluation metrics.
 
@@ -79,6 +79,21 @@ CUDA_VISIBLE_DEVICES=0 python evaluate_imagenet_gradcam_energy_inside_bbox.py <p
 |            |   GMP          |          69.08     |          69.43             |     79.30      |      66.66        |     62.89      | [checkpoint](https://drive.google.com/file/d/1rKP2oi1K83VP9w9jj_wgYw3psU_T5CMY/view?usp=sharing)  |
 |            |   Ours: GMP + GC    |          69.02      |          69.43             |     79.60      |      **68.74**        |     **65.35**      | [checkpoint](https://drive.google.com/file/d/1plynvH8rKqLi37YaTl1I3HfLCw95kbZf/view?usp=sharing)  |
 
+
+## Citation
+If you find our paper, code or models useful, please cite us using:
+```bib
+@article{Pillai_Pirsiavash_2021, 
+   title={Explainable Models with Consistent Interpretations}, 
+   volume={35}, 
+   url={https://ojs.aaai.org/index.php/AAAI/article/view/16344}, 
+   number={3}, 
+   journal={Proceedings of the AAAI Conference on Artificial Intelligence}, 
+   author={Pillai, Vipin and Pirsiavash, Hamed}, 
+   year={2021}, 
+   month={May}, 
+   pages={2431-2439} }
+```
 
 ## Acknowledgement
 We would like to thank Ashley Rothballer and Dennis Fong for helpful disucssions regarding this work.
