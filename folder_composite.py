@@ -1,4 +1,4 @@
-from vision import VisionDataset
+from torchvision.datasets.vision import VisionDataset
 
 from PIL import Image
 
